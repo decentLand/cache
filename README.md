@@ -3,8 +3,8 @@ Arweave based caching design for decent.land Tribuses
 
 # cache public-square Tribus posts:
 
-<center><img src="./cache-worklow.png"></center>
+<center><img src="./media/cache-workflow.jpg"></center>
 
 # Usage Example: public-square Tribus:
 
-<center><img src="./getcache.png" style="width: 150px; height: 150px"></center>
+<center><img src="./media/getcache.png" ></center>
