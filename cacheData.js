@@ -1,50 +1,88 @@
 const arweave = Arweave.init({
-    host: 'arweave.net',
-    protocol: 'https',
-    port: 1984
-  
+    host: "arweave.net",
+    protocol: "https"
+
 });
+const readState = smartweave.readContract
 
-const key = `CACHING WALLET JWK <String>`
-const jwk = JSON.parse(key);
+// cacher_key is the JWK stringified object of the wallet 
+// used to cache each Tribus (low-level)
+const cacher_key = ``
+
+// posting_key is the JWK stringified object of the wallet
+// used to cache the set of cacher_key results
+const posting_key = ``
+const cacher_jwk = JSON.parse(cacher_key);
+const posting_jwk = JSON.parse(posting_key);
 
 
-async function postCache() {
-	const cache_data = await cache("null");
-	console.log(cache_data)
-	const json = JSON.stringify(cache_data);
+async function cacheAll() {
 
+ 	const cache_obj = {}
+	const tribuses_id_arr = ["null"];
+	const tribuses_object = await getTribusesObjects();
+
+	for (single_tribuses_obj of Object.values(tribuses_object)) {
+		tribuses_id_arr.push( (Object.values(single_tribuses_obj))[0]["tribus_id"] )
+	};
+
+	for (tribus_id of tribuses_id_arr) {
+		console.log(`caching ${tribus_id}`)
+		const tribus_posts_object = await cache(tribus_id)
+
+		const tx = await postCacheData(tribus_posts_object, tribus_id)
+		cache_obj[tribus_id] = tx.id
+	}
+
+	let transaction_B = await arweave.createTransaction({
+		data: JSON.stringify(cache_obj)
+	}, posting_jwk);
+
+	transaction_B.addTag("Content-Type", "application/json");
+	transaction_B.addTag("unix-epoch", Date.now());
+
+	await arweave.transactions.sign(transaction_B, posting_jwk)
+	await arweave.transactions.post(transaction_B)
+
+	console.log(`cached object tx.id: ${transaction_B.id}`)
+
+};
+
+async function postCacheData(data_obj, tribus_id) {
+
+	const json = JSON.stringify(data_obj);
 
 	let transaction = await arweave.createTransaction({
 		data: json
-	}, jwk);
+	}, cacher_jwk);
 
 	transaction.addTag("Content-Type", "application/json");
-	transaction.addTag("cashing", "PublicSquare");
+	transaction.addTag("cashing", tribus_id);
 	transaction.addTag("unix-epoch", Date.now());
 
-	await arweave.transactions.sign(transaction, jwk);
+	await arweave.transactions.sign(transaction, cacher_jwk);
 	await arweave.transactions.post(transaction);
-
-	console.log(`TXID ${transaction.id}`)
-
-
+	console.log(`TXID ${transaction.id}`);
+	return transaction
+	
 };
 
 
 
 
  async function cache(tribus_id) {
+
     
     const postsTxList = await tribusPostsOf(tribus_id);
-
     const posts_map = new Map();
     const posts_obj = {};
 
     for (post of postsTxList) {
+
         const post_body = {};
 
         const post_text = await arweave.transactions.getData(post, {decode: true, string: true});
+
         post_body["text"] = post_text
 
         const post_obj = await arweave.transactions.get(post);
@@ -54,12 +92,24 @@ async function postCache() {
             const key = tag_pair.get("name", {decode: true, string: true});
             const value = tag_pair.get("value", {decode: true, string: true});
 
-            if(key == "username" || key == "user-id" || key == "pfp" || key == "tribus-name" || key == "tribus-id" || key == "unix-epoch"){
+            if (key == "username" || key == "user-id" || key == "pfp" ||
+               key == "tribus-name" || key == "tribus-id" || key == "unix-epoch") {
                 post_body[key] = value;
             };
+        };
 
-            
+        if (post_body["tribus-id"] != "null"){
+
+        	const user_id = post_body["user-id"];
+        	const tribus_id = post_body["tribus-id"]
+
+        	if( !await isHolder(user_id, tribus_id, await getTribusPostsVisibility(tribus_id))){
+        		post_body["text"] = `the user/community has decided to hide this post`;
+
+
+        	}
         }
+            	
 
         Object.defineProperty(posts_obj, post, {
             value: post_body,
@@ -68,7 +118,6 @@ async function postCache() {
             writeable: false
         } )
     }
-
 
     return posts_obj
 };
@@ -259,6 +308,7 @@ async function getTribuses(){
     return data_arr
 };
 
+
 async function isValidcXYZContract(contract_id){
     const contract_tx = await arweave.transactions.get(contract_id);
     const tags_list = await contract_tx.get("tags");
@@ -319,6 +369,27 @@ async function getTribusesObjects() {
     return tribuses_objects_arrays
 };
 
-// cache each 3hours
-setInterval(postCache, 3600 * 3 * 1000)
 
+
+async function isHolder(address, t_id, visibility) { 
+
+    const data = await readState(arweave, t_id);
+
+    return data["balances"][address] >= visibility
+};
+
+async function getTribusPostsVisibility(t_id) {
+	const tribuses_object = await getTribusesObjects()
+
+	for (single_tribuses_obj of Object.values(tribuses_object)) {
+		const tribus_data_obj =  Object.values(single_tribuses_obj)[0]
+
+		if(tribus_data_obj["tribus_id"] == t_id){
+			return tribus_data_obj["post_visibility"]
+		}
+	};
+
+}
+
+
+cacheAll()
